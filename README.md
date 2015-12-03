@@ -1,7 +1,7 @@
 Name
 ====
 
-ngx_dump_config_upstream - Nginx C module to expose Lua API to ngx_lua fori dump Nginx upstreams config
+ngx_dump_config_upstream - Nginx C module to expose Lua API to ngx_lua for dump Nginx upstreams config
 
 Table of Contents
 =================
