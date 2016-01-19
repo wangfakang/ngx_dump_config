@@ -13,17 +13,33 @@
 
 ngx_module_t ngx_dump_config_module;
 
+extern ngx_module_t ngx_http_upstream_keepalive_module;
 
 static ngx_int_t ngx_dump_config_upstream_init(ngx_conf_t *cf);
 static int ngx_dump_config_upstream_create_module(lua_State * L); 
 static int ngx_dump_config_upstreams(lua_State * L); 
-static int ngx_dump_config_servers(lua_State * L, ngx_str_t *upstream, ngx_fd_t fd);
+static int ngx_dump_config_servers(lua_State * L, ngx_http_upstream_srv_conf_t *uscf, ngx_fd_t fd);
 static ngx_http_upstream_main_conf_t *
     ngx_dump_config_get_upstream_main_conf(lua_State *L);
 static int ngx_dump_config_create_dir(const char *path);
 static int ngx_dump_config_remove_conf(const char *filepath);
 static ngx_http_upstream_srv_conf_t *
     ngx_dump_config_find_upstream(lua_State *L, ngx_str_t *host);
+
+//copy from ngx_http_upstream_keepalive_module.c 
+//TODO: make a macro
+typedef struct {
+    ngx_uint_t                         max_cached;
+    ngx_msec_t                         keepalive_timeout;
+
+    ngx_queue_t                        cache;
+    ngx_queue_t                        free;
+
+    ngx_http_upstream_init_pt          original_init_upstream;
+    ngx_http_upstream_init_peer_pt     original_init_peer;
+
+} ngx_http_upstream_keepalive_srv_conf_t;
+
 
 static ngx_http_module_t ngx_dump_config_ctx = {
     NULL,                           /* preconfiguration */
@@ -182,7 +198,7 @@ ngx_dump_config_upstreams(lua_State * L)
             }
         
             ngx_memset(buf, 0, sizeof(buf));        
-            ngx_dump_config_servers(L, &uscf->host, fd);
+            ngx_dump_config_servers(L, uscf, fd);
         }
 
     }
@@ -194,19 +210,17 @@ ngx_dump_config_upstreams(lua_State * L)
 
 
 static int
-ngx_dump_config_servers(lua_State * L, ngx_str_t *upstream, ngx_fd_t fd)
+ngx_dump_config_servers(lua_State * L, ngx_http_upstream_srv_conf_t *uscf, ngx_fd_t fd)
 {
-    ngx_str_t                             host;
-    ngx_uint_t                            i;
-    ngx_http_upstream_server_t           *server;
-    ngx_http_upstream_srv_conf_t         *us;
-    u_char                                buf[1024];
-    ssize_t                               n;
+    ngx_uint_t                                i;
+    ngx_http_upstream_server_t               *server;
+    ngx_http_upstream_srv_conf_t             *us;
+    ngx_http_upstream_keepalive_srv_conf_t   *kcf;
+    u_char                                    buf[1024];
+    ssize_t                                   n;
 
-    host.data = upstream->data;
-    host.len = upstream->len;
 
-    us = ngx_dump_config_find_upstream(L, &host);
+    us = ngx_dump_config_find_upstream(L, &uscf->host);
     if (us == NULL) {
         lua_pushnil(L);
         lua_pushliteral(L, "upstream not found");
@@ -241,6 +255,32 @@ ngx_dump_config_servers(lua_State * L, ngx_str_t *upstream, ngx_fd_t fd)
         }
 
         ngx_memset(buf, 0, sizeof(buf));
+    }
+
+    kcf = ngx_http_conf_upstream_srv_conf(uscf, ngx_http_upstream_keepalive_module);
+    if (kcf != NULL ) {
+        if (kcf->max_cached > 1) {
+            ngx_snprintf(buf, sizeof(buf), "    keepalive    %d;\n", kcf->max_cached);
+            n = ngx_write_fd(fd, buf, ngx_strlen(buf));
+            if (n == -1) {
+                lua_pushnil(L);
+                lua_pushliteral(L, "ngx_write file err"); 
+                return 2;
+            }
+        }
+
+        ngx_memset(buf, 0, sizeof(buf));
+
+        if (kcf->keepalive_timeout != NGX_CONF_UNSET_MSEC) {
+            ngx_snprintf(buf, sizeof(buf), "    keepalive_timeout    %d;\n", kcf->keepalive_timeout/1000);
+            n = ngx_write_fd(fd, buf, ngx_strlen(buf));
+            if (n == -1) {
+                lua_pushnil(L);
+                lua_pushliteral(L, "ngx_write file err"); 
+                return 2;
+            }
+            
+        }
     }
     
     n = ngx_write_fd(fd,"}\n\n",ngx_strlen("}\n\n"));
