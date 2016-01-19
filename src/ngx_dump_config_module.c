@@ -20,8 +20,8 @@ static int ngx_dump_config_upstreams(lua_State * L);
 static int ngx_dump_config_servers(lua_State * L, ngx_str_t *upstream, ngx_fd_t fd);
 static ngx_http_upstream_main_conf_t *
     ngx_dump_config_get_upstream_main_conf(lua_State *L);
-static int ngx_dump_config_create_dir(const u_char *path);
-static int ngx_dump_config_remove_conf(const u_char *filepath);
+static int ngx_dump_config_create_dir(const char *path);
+static int ngx_dump_config_remove_conf(const char *filepath);
 static ngx_http_upstream_srv_conf_t *
     ngx_dump_config_find_upstream(lua_State *L, ngx_str_t *host);
 
@@ -78,12 +78,12 @@ ngx_dump_config_upstream_create_module(lua_State * L)
     return 1;
 }
 
-static int ngx_dump_config_create_dir(const u_char *path)
+static int ngx_dump_config_create_dir(const char *path)
 {
    int i, len;
 
    len = strlen(path);
-   u_char dir_path[len + 1];
+   char dir_path[len + 1];
    dir_path[len] = '\0';
 
    ngx_memcpy(dir_path, path, len);
@@ -108,7 +108,7 @@ static int ngx_dump_config_create_dir(const u_char *path)
 }
 
 static int
-ngx_dump_config_remove_conf(const u_char *filepath)
+ngx_dump_config_remove_conf(const char *filepath)
 {
     if (access(filepath, F_OK) ==  0) {
          return unlink(filepath);
@@ -125,14 +125,14 @@ ngx_dump_config_upstreams(lua_State * L)
     ngx_http_upstream_srv_conf_t        **uscfp, *uscf;
     ngx_http_upstream_main_conf_t        *umcf;
     ngx_fd_t                              fd;
-    u_char                                buf[1024] = "";
-    size_t                                n;
+    char                                  buf[1024] = "";
+    int                                   n;
 
     if (lua_gettop(L) != 1) {
         return luaL_error(L, "it's require one parameter");
     }
 
-    file.data = (u_char *) luaL_checklstring(L, 1, &file.len); 
+    file.data = (u_char *)luaL_checklstring(L, 1, &file.len); 
     if (file.len > sizeof(buf)) {
         lua_pushnil(L);
         lua_pushliteral(L, "conf file name too long");
@@ -164,7 +164,7 @@ ngx_dump_config_upstreams(lua_State * L)
         return 2;
     }
 
-    ngx_memset(buf, 0 , sizeof(buf));
+    ngx_memset(buf, 0, sizeof(buf));
     lua_createtable(L, umcf->upstreams.nelts, 0);
 
     for (i = 0; i < umcf->upstreams.nelts; i++) {
@@ -172,7 +172,7 @@ ngx_dump_config_upstreams(lua_State * L)
         uscf = uscfp[i];
 
         if (!uscf->port) {
-            ngx_snprintf(buf, sizeof(buf), "upstream  %V  {\n", &uscf->host);
+            ngx_snprintf((u_char*)buf, sizeof(buf), "upstream  %V  {\n", &uscf->host);
             buf[sizeof(buf) - 1] = '\0';
             n = ngx_write_fd(fd, buf, ngx_strlen(buf));
             if (n == -1) {
@@ -181,7 +181,7 @@ ngx_dump_config_upstreams(lua_State * L)
                 return 2;
             }
         
-            ngx_memset(buf,0,sizeof(buf));        
+            ngx_memset(buf, 0, sizeof(buf));        
             ngx_dump_config_servers(L, &uscf->host, fd);
         }
 
@@ -201,7 +201,7 @@ ngx_dump_config_servers(lua_State * L, ngx_str_t *upstream, ngx_fd_t fd)
     ngx_http_upstream_server_t           *server;
     ngx_http_upstream_srv_conf_t         *us;
     u_char                                buf[1024];
-    size_t                                n;
+    ssize_t                               n;
 
     host.data = upstream->data;
     host.len = upstream->len;
@@ -214,8 +214,13 @@ ngx_dump_config_servers(lua_State * L, ngx_str_t *upstream, ngx_fd_t fd)
     }
 
     if (us->servers == NULL || us->servers->nelts == 0) {
+        n = ngx_write_fd(fd,"}\n\n",ngx_strlen("}\n\n"));
+        if (n == -1) {
+            lua_pushnil(L);
+            lua_pushliteral(L, "ngx_write file err"); 
+            return 2;
+        }
         lua_newtable(L);
-        ngx_write_fd(fd,"}\n\n",ngx_strlen("}\n\n"));
         return 1;
     }
 
@@ -223,17 +228,19 @@ ngx_dump_config_servers(lua_State * L, ngx_str_t *upstream, ngx_fd_t fd)
 
     lua_createtable(L, us->servers->nelts, 0);
 
+    ngx_memset(buf, 0, sizeof(buf));
+
     for (i = 0; i < us->servers->nelts; i++) {
-        ngx_snprintf(buf, sizeof(buf), "    server    %V    weight=%d fail_timeout=%d max_fails=%d%s;\n", &server[i].name, server[i].weight, server[i].fail_timeout, server[i].max_fails, server[i].backup ? " backup":"");
+        ngx_snprintf(buf, sizeof(buf), "    server    %V    weight=%d fail_timeout=%d max_fails=%d%s;\n", ngx_inet_addr(server[i].host.data, server[i].host.len) != INADDR_NONE ? (&server[i].addrs[0].name) : (&server[i].host), server[i].weight, server[i].fail_timeout, server[i].max_fails, server[i].backup ? " backup":"");
         buf[sizeof(buf) - 1] = '\0';
-        n = ngx_write_fd(fd,buf,strlen(buf));
+        n = ngx_write_fd(fd, buf, ngx_strlen(buf));
         if (n == -1) {
             lua_pushnil(L);
             lua_pushliteral(L, "ngx_write file err"); 
             return 2;
         }
 
-        ngx_memset(buf,0,sizeof(buf));
+        ngx_memset(buf, 0, sizeof(buf));
     }
     
     n = ngx_write_fd(fd,"}\n\n",ngx_strlen("}\n\n"));
