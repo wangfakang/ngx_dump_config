@@ -134,6 +134,29 @@ ngx_dump_config_remove_conf(const char *filepath)
 }
 
 static int
+ngx_http_lua_upstream_exist_peer(ngx_http_upstream_rr_peers_t * peers, ngx_str_t host)
+{
+    ngx_uint_t                          i;
+    size_t                              len;
+    size_t                              flag;
+    ngx_http_upstream_rr_peer_t         peer;
+    
+    flag = 0;
+    for (i = 0; (peers != NULL) && (i < peers->number); i++) {
+        peer = peers->peer[i];
+
+        len = peer.name.len;
+        if (len == host.len
+            && ngx_memcmp(host.data, peer.name.data, host.len) == 0) { 
+            flag = peer.down ? 0:1;
+            return 1 + flag;
+        }
+    }    
+    
+    return 0;
+}
+
+static int
 ngx_dump_config_upstreams(lua_State * L)
 {
     ngx_uint_t                            i;
@@ -213,7 +236,10 @@ static int
 ngx_dump_config_servers(lua_State * L, ngx_http_upstream_srv_conf_t *uscf, ngx_fd_t fd)
 {
     ngx_uint_t                                i;
+    ngx_uint_t                                flag;
     ngx_http_upstream_server_t               *server;
+    ngx_http_upstream_rr_peers_t             *peers;
+    ngx_http_upstream_rr_peers_t             *backup;
     ngx_http_upstream_srv_conf_t             *us;
     ngx_http_upstream_keepalive_srv_conf_t   *kcf;
     u_char                                    buf[1024];
@@ -239,13 +265,20 @@ ngx_dump_config_servers(lua_State * L, ngx_http_upstream_srv_conf_t *uscf, ngx_f
     }
 
     server = us->servers->elts;
+    peers = us->peer.data;
+    backup = peers->next;
 
     lua_createtable(L, us->servers->nelts, 0);
 
     ngx_memset(buf, 0, sizeof(buf));
 
     for (i = 0; i < us->servers->nelts; i++) {
-        ngx_snprintf(buf, sizeof(buf), "    server    %V    weight=%d fail_timeout=%d max_fails=%d%s;\n", ngx_inet_addr(server[i].host.data, server[i].host.len) != INADDR_NONE ? (&server[i].addrs[0].name) : (&server[i].host), server[i].weight, server[i].fail_timeout, server[i].max_fails, server[i].backup ? " backup":"");
+        flag = ngx_http_lua_upstream_exist_peer(server[i].backup ? backup:peers, server[i].addrs[0].name);
+        if((ngx_inet_addr(server[i].host.data, server[i].host.len) != INADDR_NONE) && !flag) {
+            continue;
+        } 
+        
+        ngx_snprintf(buf, sizeof(buf), "    server    %V    weight=%d fail_timeout=%d max_fails=%d%s%s;\n", ngx_inet_addr(server[i].host.data, server[i].host.len) != INADDR_NONE ? (&server[i].addrs[0].name) : (&server[i].host), server[i].weight, server[i].fail_timeout, server[i].max_fails, (flag == 1) ? " down":"", server[i].backup ? " backup":"");
         buf[sizeof(buf) - 1] = '\0';
         n = ngx_write_fd(fd, buf, ngx_strlen(buf));
         if (n == -1) {
