@@ -25,6 +25,8 @@ static int ngx_dump_config_create_dir(const char *path);
 static int ngx_dump_config_remove_conf(const char *filepath);
 static ngx_http_upstream_srv_conf_t *
     ngx_dump_config_find_upstream(lua_State *L, ngx_str_t *host);
+static int 
+    ngx_http_lua_upstream_exist_peer(ngx_http_upstream_rr_peers_t * peers, ngx_str_t host);
 
 //copy from ngx_http_upstream_keepalive_module.c 
 //TODO: make a macro
@@ -148,7 +150,7 @@ ngx_http_lua_upstream_exist_peer(ngx_http_upstream_rr_peers_t * peers, ngx_str_t
         len = peer.name.len;
         if (len == host.len
             && ngx_memcmp(host.data, peer.name.data, host.len) == 0) { 
-            flag = peer.down ? 0:1;
+            flag = peer.down ? 0 : 1;
             return 1 + flag;
         }
     }    
