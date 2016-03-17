@@ -212,7 +212,7 @@ ngx_dump_config_upstreams(lua_State * L)
 
         uscf = uscfp[i];
 
-        if (!uscf->port) {
+        if (!uscf->port && ngx_strncmp(uscf->host.data, "_dyups_upstream_down_host_", uscf->host.len) != 0) {
             ngx_snprintf((u_char*)buf, sizeof(buf), "upstream  %V  {\n", &uscf->host);
             buf[sizeof(buf) - 1] = '\0';
             n = ngx_write_fd(fd, buf, ngx_strlen(buf));
